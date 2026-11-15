@@ -1,0 +1,172 @@
+# listener secrets omitted
+# config.dae
+# Load all honk files placed in ./config.d/.
+
+include {
+    config.d/*.dae
+}
+
+1. 全局运行参数
+global {
+    # 日志级别
+    log_level: warn
+    # 节点连通性/状态检查的周期/秒
+    check_interval: 600s
+    # 延迟检查相关的容差阈值，供节点状态/延迟判断使用
+    check_tolerance: 30ms
+    # 指定 LAN 接口设备名称
+    lan_interface: br-lan
+    # WAN 网卡自动识别
+    wan_interface: auto
+    # 允许 HONK 自动调整运行所需的内核参数；在容器或受限环境中需留意权限
+    auto_config_kernel_parameter: true
+    # 不禁用网络就绪等待；启动时允许等待网络接口/网络环境准备完成
+    disable_waiting_network: false
+    # HONK 数据目录，用于保存运行所需的数据
+    data_dir: '/etc/honk'
+    # 日志文件路径；需确保目录存在且 HONK 有写入权限
+    log_file: '/var/log/honk/honk.log'
+    # 保存订阅相关数据
+    store_subscribe: true
+    # 域名拨号模式（如果没有使用 DNS bind 监听服务，才考虑按实际场景调整 dial_mode，domain++ prefer 属于另一种域名拨号/解析偏好设置）
+    dial_mode: domain
+    # 引导 DNS：用于解析启动阶段需要解析的域名，避免 DNS 尚未建立时出现循环依赖
+    bootstrap_resolver: '223.5.5.5:53'
+    # TCP/HTTP 连通性检测目标
+    tcp_check_url: 'https://www.gstatic.com/generate_204'
+    tcp_check_http_method: HEAD
+    # UDP DNS 连通性检测目标
+    udp_check_dns: 'dns.google.com:53', '8.8.8.8', '2001:4860:4860::8888'
+}
+2. Geo 数据资源
+assets {
+    geodata {
+        # GeoSite 域名分类规则文件
+        geosite: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat'
+        # GeoIP IP 地址归属规则文件
+        geoip: 'https://raw.githubusercontent.com/QiuSimons/geoip-moedove/refs/heads/main/geoip.dat'
+    }
+}
+# 3. 订阅源
+subscription {
+    # 订阅名称
+    liangxinyun: {
+        # 订阅地址
+        url: ''
+        # 获取/更新该订阅时使用代理还是直连
+        route: direct
+        # 订阅更新周期
+        interval: 24h
+    }
+}
+# 4. 策略组
+group {
+    shoudon {
+        filter: !name(direct, block)
+        filter: subtag(liangxinyun)
+        policy: select
+        default: '🇯🇵日本专线02|BGP|流媒体'
+        interrupt_connections: true
+    }
+    JP {
+        filter: name('🇯🇵日本专线01|BGP|流媒体')
+        filter: name('🇯🇵日本专线02|BGP|流媒体')
+        filter: name('🇯🇵日本专线04|BGP|流媒体')
+        filter: name('🇯🇵日本专线03|BGP|流媒体')
+        policy: min_moving_avg
+        interrupt_connections: false
+    }
+}
+ 5. 实验性原生 API
+experimental {
+    native_api {
+        # 启用 HONK 原生 API，供 WebUI、仪表盘或控制端调用
+        enabled: true
+        # 监听端口
+        listen: '0.0.0.0:9527'
+        #密码
+        secret: 'admin'
+        # WebUI 静态资源目录
+        ui: '/etc/honk/doona'
+        # 允许通过 API 写入/修改配置
+        config_write: true
+    }
+}
+# dns.dae
+
+dns {
+    # bind: 'tcp+udp://192.168.31.239:53530'
+
+    client_subnet: auto
+    max_cache_size: 50000
+    # 优先 IPv4
+    ipversion_prefer: 4
+    upstream {
+        # 通过本机回环地址访问，不经过的透明 DNS 拦截。
+        #lan_dns: 'udp://127.0.0.1:53' -> direct
+
+        # 国内 DNS：直连
+        local: 'udp://223.5.5.5:53' -> direct
+        # 国外 DNS：通过代理
+        remote: 'https://dns.google/dns-query' -> shoudon
+    }
+    routing {
+        request {
+            # OpenWrt 本地域名交给 dnsmasq
+            #qname(suffix: lan) -> lan_dns
+            # 私有域名使用本地 DNS
+            #qname(geosite:private) -> lan_dns
+
+
+            # 私有域名使用本地 DNS
+            qname(geosite:private) -> local
+            # GFW 域名使用国外 DNS
+            qname(geosite:gfw) -> remote
+            # 其他域名默认使用国内 DNS
+            fallback: local
+        }
+        response {
+            # 国外 DNS 返回的结果直接接受
+            upstream(remote) -> accept
+
+
+            # 本地域名结果直接接受。
+            #qname(suffix: lan) -> accept
+
+
+            # 私有域名的解析结果直接接受
+            qname(geosite:private) -> accept
+            # 国内 IP 直接接受
+            ip(geoip:cn) -> accept
+            # 其他结果重新交给国外 DNS 查询
+            fallback: remote
+        }
+    }
+}
+
+#IP / 域名流量路由规则
+
+routing {
+  # 规则按照配置中的先后顺序进行匹配
+
+  # 局域网常见多播/组播地址段直接连接
+  dip(224.0.0.0/3, 'ff00::/8') -> direct
+
+  # 指定域名后缀直接连接
+  domain(suffix: apple.com, suffix: 115.com, suffix: bilibili.com, suffix: fnnas.com, suffix: icloud.com) -> direct
+
+  # 私有/内网 IP 地址直接连接
+  dip(geoip:private) -> direct
+
+  # Google 中国相关域名及中国大陆游戏分类域名直接连接
+  domain(geosite:google-cn, geosite:category-games@cn) -> direct
+
+  # 命中中国大陆域名分类的流量直接连接
+  domain(geosite:cn) -> direct
+
+  # 目的 IP 属于中国大陆 IP 段时直接连接
+  dip(geoip:cn) -> direct
+
+  以上规则均未命中时，默认交给策略组代理
+  fallback: shoudon
+}
