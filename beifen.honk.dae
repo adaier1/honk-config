@@ -1,0 +1,107 @@
+# listener secrets omitted
+# config.dae
+# Load all honk files placed in ./config.d/.
+
+include {
+    config.d/*.dae
+}
+
+global {
+    log_level: warn
+    check_interval: 600s
+    check_tolerance: 30ms
+    lan_interface: br-lan
+    wan_interface: auto
+    auto_config_kernel_parameter: true
+    disable_waiting_network: false
+    data_dir: '/etc/honk'
+    log_file: '/var/log/honk/honk.log'
+    store_subscribe: true
+    dial_mode: domain
+    bootstrap_resolver: '223.5.5.5:53'
+    tcp_check_url: 'https://www.gstatic.com/generate_204'
+    tcp_check_http_method: HEAD
+    udp_check_dns: 'dns.google.com:53', '8.8.8.8', '2001:4860:4860::8888'
+}
+
+assets {
+    geodata {
+        geosite: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geosite.dat'
+        geoip: 'https://raw.githubusercontent.com/QiuSimons/geoip-moedove/refs/heads/main/geoip.dat'
+    }
+}
+
+subscription {
+
+    liangxinyun: {
+
+        url: ''
+        route: direct
+        interval: 24h
+    }
+}
+# 4. 策略组
+group {
+    shoudon {
+        filter: !name(direct, block)
+        filter: subtag(liangxinyun)
+        policy: select
+        default: '🇯🇵日本专线02|BGP|流媒体'
+        interrupt_connections: true
+    }
+    JP {
+        filter: name('🇯🇵日本专线01|BGP|流媒体')
+        filter: name('🇯🇵日本专线02|BGP|流媒体')
+        filter: name('🇯🇵日本专线04|BGP|流媒体')
+        filter: name('🇯🇵日本专线03|BGP|流媒体')
+        policy: min_moving_avg
+        interrupt_connections: false
+    }
+}
+
+experimental {
+    native_api {
+        enabled: true
+        listen: '0.0.0.0:9527'
+        secret: 'adminadmin123'
+        ui: '/etc/honk/doona'
+        config_write: true
+    }
+}
+
+dns {
+     bind: 'tcp+udp://192.168.31.239:53530'
+
+    client_subnet: auto
+    max_cache_size: 50000
+    ipversion_prefer: 4
+    upstream {
+        local: 'udp://223.5.5.5:53' -> direct
+        remote: 'https://dns.google/dns-query' -> shoudon
+    }
+    routing {
+        request {
+            qname(geosite:private) -> local
+            qname(geosite:gfw) -> remote
+            fallback: local
+        }
+        response {
+            upstream(remote) -> accept
+            qname(geosite:private) -> accept
+            ip(geoip:cn) -> accept
+            fallback: remote
+        }
+    }
+}
+
+
+routing {
+
+  dip(224.0.0.0/3, 'ff00::/8') -> direct
+  domain(suffix: apple.com, suffix: 115.com, suffix: bilibili.com, suffix: fnnas.com, suffix: icloud.com) -> direct
+  dip(geoip:private) -> direct
+  domain(geosite:google-cn, geosite:category-games@cn) -> direct
+  domain(geosite:cn) -> direct
+  dip(geoip:cn) -> direct
+  fallback: shoudon
+}
