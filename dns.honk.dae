@@ -1,0 +1,43 @@
+dns {
+    # 仅供 AdGuard Home 使用
+    bind: 'tcp+udp://192.168.31.239:53530'
+    # ECS 自动识别
+    client_subnet: auto
+    # DNS 缓存
+    max_cache_size: 50000
+    # 优先 IPv4
+    ipversion_prefer: 4
+    upstream {
+        # 国内 DNS：直连
+        local: 'udp://223.5.5.5:53' -> direct
+        # 国外 DNS：通过 shoudon 代理组
+        remote: 'https://dns.google/dns-query' -> shoudon
+        # 内网 DNS
+        lan: 'udp://127.0.0.1:5353' -> direct
+    }
+
+    routing {
+        request {
+            # 内网域名交给 dnsmasq
+            qname(suffix: lan) -> lan
+            qname(suffix: home.arpa) -> lan
+            # 中国大陆域名：国内 DNS
+            qname(geosite: geolocation-cn) -> local
+            # 非中国大陆域名：国外 DNS
+            qname(geosite: geolocation-!cn) -> remote
+            # 未分类域名：默认走国外 DNS
+            fallback: remote
+        }
+
+        response {
+            # 国外 DNS 返回结果：直接接受
+            upstream(remote) -> accept
+            # 私有 IP 直接接受
+            ip(geoip: private) -> accept
+            # 国内 IP：直接接受
+            ip(geoip: cn) -> accept
+            # 国内 DNS 返回非国内 IP：重新走国外 DNS
+            fallback: remote
+        }
+    }
+}
